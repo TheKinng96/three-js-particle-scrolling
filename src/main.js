@@ -29,6 +29,9 @@ controls.minDistance = 3; // Minimum zoom distance
 controls.maxDistance = 20; // Maximum zoom distance
 controls.maxPolarAngle = Math.PI; // Maximum vertical angle
 
+let points;
+const DESIRED_SIZE = 5;
+
 const gltfLoader = new GLTFLoader();
 gltfLoader.load('assets/models/dog/scene.gltf', (gltf) => {
   const root = gltf.scene;
@@ -39,7 +42,7 @@ gltfLoader.load('assets/models/dog/scene.gltf', (gltf) => {
   root.position.sub(center);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = 5 / maxDim;
+  const scale = DESIRED_SIZE / maxDim;
   root.scale.set(scale, scale, scale);
 
   // 2) Gather all mesh geometries (apply their world transforms):
@@ -86,10 +89,17 @@ gltfLoader.load('assets/models/dog/scene.gltf', (gltf) => {
     opacity: 0.8,
     sizeAttenuation: true,
   });
-  const points = new THREE.Points(particlesGeo, particlesMat);
-  scene.add(points);
+  points = new THREE.Points(particlesGeo, particlesMat);
 
-  // 7) Remove or hide the original
+  // 7) NORMALIZE SIZE: box → scale so maxDim === DESIRED_SIZE
+  points.scale.setScalar(scale);
+
+  // 8) RE-CENTER after scaling
+  box.setFromObject(points);
+  points.position.sub(center);
+
+  // 9) Add to scene and remove original mesh
+  scene.add(points);
   scene.remove(root);
 });
 
@@ -97,6 +107,10 @@ camera.position.z = 10;
 
 function animate() {
     controls.update();
+    if (points) {
+      // spin around Y axis → horizontal rotation
+      points.rotation.y += 0.005;
+    }
     renderer.render(scene, camera);
 }
 
