@@ -8,7 +8,7 @@ const MODEL_URLS = [
   'assets/models/deer/scene.gltf',
   'assets/models/penguin/scene.gltf',
 ];
-const N = 20000; // number of particles
+const N = 10000; // number of particles
 const SIZE = 5; // normalized “footprint” size
 let modelPositions = []; // will hold three Float32Arrays
 let scrollPhase = 0; // 0→2
@@ -36,7 +36,13 @@ async function sampleModel(url) {
   const box = new THREE.Box3().setFromObject(root);
   const c = box.getCenter(new THREE.Vector3());
   root.position.sub(c);
-  const s = 5 / Math.max(...Object.values(box.getSize(new THREE.Vector3())).slice(0, 3));
+  let s = 5 / Math.max(...Object.values(box.getSize(new THREE.Vector3())).slice(0, 3));
+
+  if (url.includes('deer')) {
+    s *= 0.03;
+  }
+
+  root.position.sub(box.getCenter(new THREE.Vector3()));
   root.scale.setScalar(s);
 
   // merge all sub-geometries
@@ -44,6 +50,8 @@ async function sampleModel(url) {
   root.updateWorldMatrix(true, false);
   root.traverse((ch) => ch.isMesh && geoms.push(ch.geometry.clone().applyMatrix4(ch.matrixWorld)));
   const merged = mergeGeometries(geoms, true);
+
+  merged.center();
 
   // surface-sample N points
   const sampler = new MeshSurfaceSampler(new THREE.Mesh(merged)).build();
@@ -63,7 +71,16 @@ async function sampleModel(url) {
 (async function init() {
   // load & sample
   for (let url of MODEL_URLS) {
-    modelPositions.push(await sampleModel(url));
+    let arr = await sampleModel(url);
+
+    // if it’s deer, scale every coordinate
+    if (url.includes('deer')) {
+      const factor = 0.03;
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] *= factor;
+      }
+    }
+    modelPositions.push(arr);
   }
 
   // build the Points once, using the dog positions
