@@ -1,124 +1,114 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/Addons.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
+import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js';
+
+const MODEL_URLS = [
+  'assets/models/dog/scene.gltf',
+  'assets/models/deer/scene.gltf',
+  'assets/models/penguin/scene.gltf',
+];
+const N = 20000; // number of particles
+const SIZE = 5; // normalized “footprint” size
+let modelPositions = []; // will hold three Float32Arrays
+let scrollPhase = 0; // 0→2
+let points, positionsAttr;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(innerWidth, innerHeight);
 renderer.setClearColor(0xf0f0f0);
 document.body.appendChild(renderer.domElement);
 
-// Add lights
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-scene.add(ambientLight);
+camera.position.z = 10;
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+dl.position.set(1, 1, 1);
+scene.add(dl);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(1, 1, 1);
-scene.add(directionalLight);
-
-// Add orbit controls
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; // Add smooth damping
-controls.dampingFactor = 0.05; // Damping factor
-controls.screenSpacePanning = false; // Pan in 3D space
-controls.minDistance = 3; // Minimum zoom distance
-controls.maxDistance = 20; // Maximum zoom distance
-controls.maxPolarAngle = Math.PI; // Maximum vertical angle
-
-let points;
-const DESIRED_SIZE = 5;
-
-const gltfLoader = new GLTFLoader();
-gltfLoader.load('assets/models/dog/scene.gltf', (gltf) => {
+// 1) sample all three models into Float32Arrays
+const loader = new GLTFLoader();
+async function sampleModel(url) {
+  const gltf = await loader.loadAsync(url);
   const root = gltf.scene;
-
-  // 1) Center & scale the root just as before
+  // center & roughly scale so all get same sampling size
   const box = new THREE.Box3().setFromObject(root);
-  const center = box.getCenter(new THREE.Vector3());
-  root.position.sub(center);
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = DESIRED_SIZE / maxDim;
-  root.scale.set(scale, scale, scale);
+  const c = box.getCenter(new THREE.Vector3());
+  root.position.sub(c);
+  const s = 5 / Math.max(...Object.values(box.getSize(new THREE.Vector3())).slice(0, 3));
+  root.scale.setScalar(s);
 
-  // 2) Gather all mesh geometries (apply their world transforms):
+  // merge all sub-geometries
   const geoms = [];
   root.updateWorldMatrix(true, false);
-  root.traverse((child) => {
-    if (child.isMesh) {
-      const geom = child.geometry.clone();
-      geom.applyMatrix4(child.matrixWorld);
-      geoms.push(geom);
-    }
-  });
-  // 3) Merge into one big geometry:
+  root.traverse((ch) => ch.isMesh && geoms.push(ch.geometry.clone().applyMatrix4(ch.matrixWorld)));
   const merged = mergeGeometries(geoms, true);
 
-  // 4) Build a surface sampler
-  const sampler = new MeshSurfaceSampler(new THREE.Mesh(merged))
-    .setWeightAttribute(null) // or a custom weight for non-uniform density
-    .build();
-
-  // 5) Sample N points
-  const N = 20_000;
-  const positions = new Float32Array(N * 3);
-  const tempPos = new THREE.Vector3();
+  // surface-sample N points
+  const sampler = new MeshSurfaceSampler(new THREE.Mesh(merged)).build();
+  const posArr = new Float32Array(N * 3);
+  const tmp = new THREE.Vector3();
   for (let i = 0; i < N; i++) {
-    sampler.sample(tempPos);
-    // optional jitter in a small radius:
-    tempPos.x += (Math.random() - 0.5) * 0.02;
-    tempPos.y += (Math.random() - 0.5) * 0.02;
-    tempPos.z += (Math.random() - 0.5) * 0.02;
-    positions.set([tempPos.x, tempPos.y, tempPos.z], i * 3);
+    sampler.sample(tmp);
+    // tiny jitter
+    tmp.x += (Math.random() - 0.5) * 0.02;
+    tmp.y += (Math.random() - 0.5) * 0.02;
+    tmp.z += (Math.random() - 0.5) * 0.02;
+    posArr.set([tmp.x, tmp.y, tmp.z], i * 3);
+  }
+  return posArr;
+}
+
+(async function init() {
+  // load & sample
+  for (let url of MODEL_URLS) {
+    modelPositions.push(await sampleModel(url));
   }
 
-  // 6) Create the Points mesh
-  const particlesGeo = new THREE.BufferGeometry();
-  particlesGeo.setAttribute(
-    'position',
-    new THREE.BufferAttribute(positions, 3)
-  );
-  const particlesMat = new THREE.PointsMaterial({
+  // build the Points once, using the dog positions
+  const geometry = new THREE.BufferGeometry();
+  const initial = new Float32Array(N * 3);
+  initial.set(modelPositions[0]);
+  positionsAttr = new THREE.BufferAttribute(initial, 3);
+  geometry.setAttribute('position', positionsAttr);
+
+  const material = new THREE.PointsMaterial({
     size: 0.03,
     color: 0x222222,
     transparent: true,
     opacity: 0.8,
     sizeAttenuation: true,
   });
-  points = new THREE.Points(particlesGeo, particlesMat);
 
-  // 7) NORMALIZE SIZE: box → scale so maxDim === DESIRED_SIZE
-  points.scale.setScalar(scale);
-
-  // 8) RE-CENTER after scaling
-  box.setFromObject(points);
-  points.position.sub(center);
-
-  // 9) Add to scene and remove original mesh
+  points = new THREE.Points(geometry, material);
   scene.add(points);
-  scene.remove(root);
-});
 
-camera.position.z = 10;
+  // listen scroll
+  window.addEventListener('scroll', onScroll, false);
 
-function animate() {
-    controls.update();
-    if (points) {
-      // spin around Y axis → horizontal rotation
-      points.rotation.y += 0.005;
-    }
-    renderer.render(scene, camera);
+  animate();
+})();
+
+function onScroll() {
+  const scrollNorm = window.scrollY / (document.body.scrollHeight - innerHeight);
+  scrollPhase = THREE.MathUtils.clamp(scrollNorm * (MODEL_URLS.length - 1), 0, MODEL_URLS.length - 1);
 }
 
-renderer.setAnimationLoop(animate);
+function animate() {
+  const i0 = Math.floor(scrollPhase),
+    i1 = Math.min(i0 + 1, modelPositions.length - 1),
+    t = scrollPhase - i0;
+  const a0 = modelPositions[i0],
+    a1 = modelPositions[i1],
+    dst = positionsAttr.array;
 
-// Handle window resize
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  for (let i = 0; i < dst.length; i++) {
+    dst[i] = a0[i] + (a1[i] - a0[i]) * t;
+  }
+  positionsAttr.needsUpdate = true;
+
+  points.rotation.y += 0.005;
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
