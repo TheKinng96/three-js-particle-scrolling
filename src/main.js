@@ -9,7 +9,6 @@ const MODEL_URLS = [
   'assets/models/penguin/scene.gltf',
 ];
 const N = 10000; // number of particles
-const SIZE = 5; // normalized “footprint” size
 let modelPositions = []; // will hold three Float32Arrays
 let scrollPhase = 0; // 0→2
 let points, positionsAttr;
@@ -108,8 +107,24 @@ async function sampleModel(url) {
 })();
 
 function onScroll() {
+  // normalized scroll [0…1]
   const scrollNorm = window.scrollY / (document.body.scrollHeight - innerHeight);
-  scrollPhase = THREE.MathUtils.clamp(scrollNorm * (MODEL_URLS.length - 1), 0, MODEL_URLS.length - 1);
+  const segments = MODEL_URLS.length - 1; // e.g. 2
+  const rawPhase = scrollNorm * segments; // [0…2]
+
+  // break into integer segment + fractional progress
+  const i0 = Math.floor(rawPhase);
+  const f0 = THREE.MathUtils.clamp(rawPhase - i0, 0, 1);
+
+  // define plateau zone [start…end] within each segment
+  const start = 0.5,
+    end = 0.9; // 50% in, 90% out
+  let t;
+  if (f0 < start) t = 0; // fully model i0
+  else if (f0 > end) t = 1; // fully model i0+1
+  else t = (f0 - start) / (end - start);
+
+  scrollPhase = THREE.MathUtils.clamp(i0 + t, 0, segments);
 }
 
 function animate() {
