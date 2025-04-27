@@ -37,6 +37,7 @@ async function sampleModel(url) {
   root.position.sub(c);
   let s = 5 / Math.max(...Object.values(box.getSize(new THREE.Vector3())).slice(0, 3));
 
+  // scale the deer model because it's too big
   if (url.includes('deer')) {
     s *= 0.03;
   }
